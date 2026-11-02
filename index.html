@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Twibbon Briefing Pagi P2TL</title>
+<meta name="description" content="Twibbon Briefing Pagi P2TL UP3 Ciracas - UID Jaya">
+<meta name="robots" content="noindex, nofollow">
+<style>
+  :root{
+    --navy:#102B6E; --blue:#1778E1; --yellow:#FFD33E;
+    --bg:#F4F7FC; --card:#ffffff; --text:#1a1a2e; --muted:#6b7280;
+    --soft:#e7edf9; --soft-text:#102B6E; --heading:#102B6E;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#12172a; --card:#1b2140; --text:#eef1fb; --muted:#a2a9c4; --soft:#2a3252; --soft-text:#cfe0ff; --heading:#ffffff; }
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;}
+  body{min-height:100vh;padding:20px 16px 60px;}
+  .wrap{max-width:520px;margin:0 auto;}
+  h1{font-size:1.25rem;margin:4px 0 4px;color:var(--heading);}
+  p.sub{margin:0 0 16px;color:var(--muted);font-size:0.92rem;line-height:1.5;}
+  .seg{display:flex;background:var(--soft);border-radius:12px;padding:4px;margin-bottom:14px;}
+  .seg button{flex:1;background:transparent;color:var(--soft-text);}
+  .seg button.active{background:var(--blue);color:#fff;}
+  .stage{position:relative;width:100%;border-radius:18px;overflow:hidden;box-shadow:0 10px 30px rgba(16,43,110,0.18);background:#fff;touch-action:none;}
+  canvas{display:block;width:100%;height:auto;cursor:grab;}
+  canvas.dragging{cursor:grabbing;}
+  .slot-controls{background:var(--card);border-radius:14px;padding:14px 16px;margin-top:14px;box-shadow:0 2px 10px rgba(16,43,110,0.08);}
+  .slot-controls h3{margin:0 0 10px;font-size:0.95rem;color:var(--heading);}
+  .row{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;}
+  .row:last-child{margin-bottom:0;}
+  .row label{font-size:0.82rem;color:var(--muted);min-width:44px;}
+  input[type=range]{flex:1;accent-color:var(--blue);min-width:120px;}
+  button{font:inherit;border:none;border-radius:10px;padding:9px 14px;font-size:0.85rem;font-weight:600;cursor:pointer;transition:transform .08s ease, opacity .15s ease;}
+  button:active{transform:scale(0.96);}
+  .btn-secondary{background:var(--soft);color:var(--soft-text);}
+  button:disabled{opacity:0.45;cursor:not-allowed;}
+  .download-bar{margin-top:18px;display:flex;flex-direction:column;gap:8px;}
+  .download-bar button{width:100%;padding:14px;font-size:1rem;background:var(--navy);color:#fff;border-radius:12px;}
+  .status{font-size:0.82rem;color:var(--muted);min-height:18px;text-align:center;}
+  .hint{font-size:0.78rem;color:var(--muted);text-align:center;margin-top:10px;line-height:1.5;}
+  footer{text-align:center;margin-top:26px;font-size:0.74rem;color:var(--muted);}
+  .hidden{display:none;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Twibbon Briefing Pagi P2TL</h1>
+  <p class="sub">Pilih layout, unggah foto briefing, geser dan zoom untuk atur posisi, lalu unduh hasilnya dalam resolusi tinggi.</p>
+
+  <div class="seg" role="tablist">
+    <button id="mode2" class="active" type="button">2 Foto</button>
+    <button id="mode1" type="button">1 Foto</button>
+  </div>
+
+  <div class="stage"><canvas id="canvas"></canvas></div>
+
+  <div id="controls"></div>
+
+  <div class="hint">Tips: ketuk bingkai kosong untuk memilih foto, lalu seret foto untuk menggeser.<br>Cap tanggal/lokasi dari aplikasi kamera bisa disembunyikan dengan menggeser atau memperbesar foto.</div>
+
+  <div class="download-bar">
+    <button id="downloadBtn" type="button" disabled>Unduh Hasil (PNG)</button>
+    <div class="status" id="status">Unggah foto untuk mulai.</div>
+  </div>
+
+  <footer>P2TL UP3 Ciracas - UID Jaya</footer>
+</div>
+
+<input type="file" id="fileInput" accept="image/*" class="hidden">
+
+<script>
+// Canvas dibuat 2x ukuran desain (1036x1601) supaya hasil unduhan beresolusi tinggi.
+const S = 2;
+const CW = 1036 * S, CH = 1601 * S;
+
+const LAYOUTS = {
+  2: { frame: 'assets/frame-2foto.png', slots: [
+        {x:18, y:234, w:1000, h:510, label:'Foto 1 (atas)'},
+        {x:18, y:765, w:1000, h:511, label:'Foto 2 (bawah)'} ] },
+  1: { frame: 'assets/frame-1foto.png', slots: [
+        {x:18, y:234, w:1000, h:1042, label:'Foto'} ] },
+};
+const RADIUS = 26;
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+canvas.width = CW; canvas.height = CH;
+
+const frames = {};
+for (const k of Object.keys(LAYOUTS)) {
+  const img = new Image();
+  img.onload = () => { frames[k] = img; render(); };
+  img.src = LAYOUTS[k].frame;
+}
+
+// Foto disimpan per layout supaya tidak hilang saat ganti mode.
+const state = {};
+for (const k of Object.keys(LAYOUTS)) {
+  state[k] = LAYOUTS[k].slots.map(s => ({
+    x:s.x*S, y:s.y*S, w:s.w*S, h:s.h*S, label:s.label,
+    img:null, scale:1, minScale:1, zoom:1, offsetX:0, offsetY:0,
+  }));
+}
+let mode = '2';
+const slots = () => state[mode];
+
+function roundRectPath(c, x, y, w, h, r){
+  c.beginPath();
+  c.moveTo(x+r, y);
+  c.arcTo(x+w, y, x+w, y+h, r);
+  c.arcTo(x+w, y+h, x, y+h, r);
+  c.arcTo(x, y+h, x, y, r);
+  c.arcTo(x, y, x+w, y, r);
+  c.closePath();
+}
+
+function clampOffsets(slot){
+  if(!slot.img) return;
+  const dispW = slot.img.width * slot.scale, dispH = slot.img.height * slot.scale;
+  const mx = Math.max(0, (dispW - slot.w)/2), my = Math.max(0, (dispH - slot.h)/2);
+  slot.offsetX = Math.min(mx, Math.max(-mx, slot.offsetX));
+  slot.offsetY = Math.min(my, Math.max(-my, slot.offsetY));
+}
+
+function drawPlaceholder(slot){
+  ctx.save();
+  roundRectPath(ctx, slot.x, slot.y, slot.w, slot.h, RADIUS*S);
+  ctx.clip();
+  ctx.fillStyle = '#e9edf6';
+  ctx.fillRect(slot.x, slot.y, slot.w, slot.h);
+  ctx.strokeStyle = '#b9c4dc'; ctx.lineWidth = 4*S; ctx.setLineDash([14*S,10*S]);
+  ctx.strokeRect(slot.x+8*S, slot.y+8*S, slot.w-16*S, slot.h-16*S);
+  ctx.setLineDash([]);
+  const cx = slot.x + slot.w/2, cy = slot.y + slot.h/2;
+  ctx.strokeStyle = '#7c8bb3'; ctx.lineWidth = 6*S;
+  ctx.beginPath(); ctx.arc(cx, cy-18*S, 40*S, 0, Math.PI*2); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cx-46*S, cy+52*S); ctx.lineTo(cx-14*S, cy+8*S); ctx.lineTo(cx+18*S, cy+38*S); ctx.lineTo(cx+46*S, cy+6*S);
+  ctx.stroke();
+  ctx.fillStyle = '#5b6a91';
+  ctx.font = `600 ${30*S}px Segoe UI, Roboto, Arial, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.fillText('Ketuk untuk pilih foto', cx, cy+96*S);
+  ctx.restore();
+}
+
+function drawSlotImage(slot){
+  ctx.save();
+  roundRectPath(ctx, slot.x, slot.y, slot.w, slot.h, RADIUS*S);
+  ctx.clip();
+  const dispW = slot.img.width * slot.scale, dispH = slot.img.height * slot.scale;
+  const cx = slot.x + slot.w/2 + slot.offsetX, cy = slot.y + slot.h/2 + slot.offsetY;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(slot.img, cx-dispW/2, cy-dispH/2, dispW, dispH);
+  ctx.restore();
+}
+
+function render(){
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0,0,CW,CH);
+  for(const slot of slots()) slot.img ? drawSlotImage(slot) : drawPlaceholder(slot);
+  if(frames[mode]){ ctx.imageSmoothingQuality = 'high'; ctx.drawImage(frames[mode], 0, 0, CW, CH); }
+  const ready = slots().every(s => s.img);
+  document.getElementById('downloadBtn').disabled = !ready;
+  document.getElementById('status').textContent = ready ? 'Siap diunduh.' :
+    (mode === '2' ? 'Unggah kedua foto untuk mulai mengunduh.' : 'Unggah foto untuk mulai mengunduh.');
+}
+
+// ---------- Panel kontrol ----------
+function buildControls(){
+  const box = document.getElementById('controls');
+  box.innerHTML = '';
+  slots().forEach((slot, i) => {
+    const el = document.createElement('div');
+    el.className = 'slot-controls';
+    el.innerHTML = `
+      <h3>${slot.label}</h3>
+      <div class="row">
+        <button class="btn-secondary" data-act="upload" type="button">${slot.img ? 'Ganti Foto' : 'Pilih Foto'}</button>
+        <button class="btn-secondary" data-act="reset" type="button" ${slot.img ? '' : 'disabled'}>Reset posisi</button>
+      </div>
+      <div class="row">
+        <label>Zoom</label>
+        <input type="range" min="1" max="3" step="0.01" value="${slot.zoom}" ${slot.img ? '' : 'disabled'}>
+      </div>`;
+    el.querySelector('[data-act=upload]').onclick = () => pickFile(i);
+    el.querySelector('[data-act=reset]').onclick = () => {
+      slot.zoom = 1; slot.scale = slot.minScale; slot.offsetX = 0; slot.offsetY = 0;
+      el.querySelector('input').value = 1; render();
+    };
+    el.querySelector('input').oninput = e => {
+      if(!slot.img) return;
+      slot.zoom = parseFloat(e.target.value);
+      slot.scale = slot.minScale * slot.zoom;
+      clampOffsets(slot); render();
+    };
+    box.appendChild(el);
+  });
+}
+
+function setMode(m){
+  mode = m;
+  document.getElementById('mode1').classList.toggle('active', m === '1');
+  document.getElementById('mode2').classList.toggle('active', m === '2');
+  buildControls(); render();
+}
+document.getElementById('mode1').onclick = () => setMode('1');
+document.getElementById('mode2').onclick = () => setMode('2');
+
+// ---------- Unggah foto ----------
+const fileInput = document.getElementById('fileInput');
+let pendingSlot = 0;
+function pickFile(i){ pendingSlot = i; fileInput.value = ''; fileInput.click(); }
+fileInput.addEventListener('change', e => {
+  const file = e.target.files[0];
+  if(!file) return;
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    const slot = slots()[pendingSlot];
+    slot.img = img;
+    slot.minScale = Math.max(slot.w / img.width, slot.h / img.height);
+    slot.zoom = 1; slot.scale = slot.minScale; slot.offsetX = 0; slot.offsetY = 0;
+    buildControls(); render();
+    URL.revokeObjectURL(url);
+  };
+  img.onerror = () => { document.getElementById('status').textContent = 'Format foto tidak didukung. Coba JPG atau PNG.'; };
+  img.src = url;
+});
+
+// ---------- Geser posisi ----------
+let dragSlot = null, dragStart = null;
+function pt(evt){
+  const r = canvas.getBoundingClientRect();
+  return { x:(evt.clientX-r.left)*CW/r.width, y:(evt.clientY-r.top)*CH/r.height };
+}
+function slotAt(x, y){ return slots().find(s => x>=s.x && x<=s.x+s.w && y>=s.y && y<=s.y+s.h) || null; }
+
+canvas.addEventListener('pointerdown', evt => {
+  const p = pt(evt), slot = slotAt(p.x, p.y);
+  if(!slot) return;
+  if(!slot.img){ pickFile(slots().indexOf(slot)); return; }
+  dragSlot = slot;
+  dragStart = { x:p.x, y:p.y, offX:slot.offsetX, offY:slot.offsetY };
+  canvas.classList.add('dragging');
+  canvas.setPointerCapture(evt.pointerId);
+});
+canvas.addEventListener('pointermove', evt => {
+  if(!dragSlot) return;
+  const p = pt(evt);
+  dragSlot.offsetX = dragStart.offX + (p.x - dragStart.x);
+  dragSlot.offsetY = dragStart.offY + (p.y - dragStart.y);
+  clampOffsets(dragSlot); render();
+});
+function endDrag(){ if(dragSlot){ canvas.classList.remove('dragging'); dragSlot = null; } }
+canvas.addEventListener('pointerup', endDrag);
+canvas.addEventListener('pointercancel', endDrag);
+
+// ---------- Unduh ----------
+document.getElementById('downloadBtn').addEventListener('click', () => {
+  const status = document.getElementById('status');
+  const btn = document.getElementById('downloadBtn');
+  btn.disabled = true;
+  status.textContent = 'Menyiapkan file...';
+  canvas.toBlob(blob => {
+    if(!blob){ status.textContent = 'Gagal membuat file. Coba lagi.'; btn.disabled = false; return; }
+    const d = new Date();
+    const stamp = d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `twibbon-briefing-pagi-p2tl-${stamp}.png`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    status.textContent = 'Berhasil diunduh!';
+    btn.disabled = false;
+  }, 'image/png');
+});
+
+setMode('2');
+</script>
+</body>
+</html>
